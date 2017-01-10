@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Jump Plot</title>
+<style>
+
+@import url(https://bost.ocks.org/mike/style.css?aea6f0a);
+
+body {
+    background: #fcfcfa;
+    color: #333;
+    font-family: "PT Serif", serif;
+    margin: 1em auto 4em auto;
+    position: relative;
+    width: 960px;
+}
+
+.link {
+  fill: none;
+  stroke: #999;
+  stroke-width: 1.5px;
+  stroke-opacity: .2;
+}
+
+.axis, .node {
+  stroke: #000;
+  stroke-width: .25px;
+}
+
+.axis text {
+   fill: "grey";
+}
+
+.link.active {
+  stroke: steelblue;
+  stroke-width: 2.5px;
+  stroke-opacity: 1;
+  opacity: 1;
+}
+
+.link.big {
+  stroke-width: 5px;
+}
+
+
+.node circle.active {
+  fill: blue;
+}
+
+</style>
+<header>
+  <aside>April, 2016 / <a href="http://www.jumpplot.com" rel="authors">Chris DeMartini and Tom Van Buskirk</a></aside>
+</header>
+<body>
+<h1>Jump Plot</h1>
+<aside>This <b>jump plot</b>, a type of event sequencing diagram, shows some mock data.
+
+<p>Each dot represents an event (referred to as a "checkpoint"), and each line (referred to as a "hop") represents the elapsed time between the two checkpoints it connects.
+
+<p>Mouseover for more details, and visit <a href="http://www.jumpplot.com">jumpplot.com</a> to read more about the use case for jump plots in visualizing event sequences.
+
+<p>Built with <a href="http://d3js.org/">d3.js</a>.
+
+<p>To be consistent with existing d3.js examples, we leveraged Mike Bostock's <a href="https://bost.ocks.org/mike/hive/">hive plot implementation</a> as a starting point for developing jump plot in D3 as well as the format and structure of this page.
+
+</aside>
+
+<p id="info">Loading…
+
+<p id="chart">
+
+<div id="option">
+    <input id="colorButton"
+           name="colorButton" 
+           type="button" 
+           value="Color Hops" 
+           onclick="colorHops()" />
+    <input id="circleButton"
+           name="circleButton" 
+           type="button" 
+           value="Big Checkpoints" 
+           onclick="changeChecks()" />
+    <input id="hopButton"
+           name="hopButton" 
+           type="button" 
+           value="Big Hops" 
+           onclick="changeHops()" />
+    <input id="bezierButton"
+           name="bezierButton" 
+           type="button" 
+           value="Cubic" 
+           onclick="changeCurves()" />
+    <input name="SFOButton" 
+           type="button" 
+           value="Filter SFO" 
+           onclick="filterHops('SFO')" />
+    <input name="AUSButton" 
+           type="button" 
+           value="Filter AUS" 
+           onclick="filterHops('AUS')" />
+    <input name="BGRButton" 
+           type="button" 
+           value="Filter BGR" 
+           onclick="filterHops('BGR')" />
+    <input name="revertButton" 
+           type="button" 
+           value="Revert" 
+           onclick="filterHops('revert')" />
+    <input id="updateButton" 
+           name="updateButton" 
+           type="button" 
+           value="Open Detail" 
+           onclick="linkClick()" />
+</div>
+
+<p id="info2">
+<p id="chart2">
+
+<p>The Jump Plot is grounded in network graphing. Top influencers include the <a href='http://bl.ocks.org/enjoylife/4e435d329c2c743da33e'>arc diagram</a> and <a href='https://bl.ocks.org/mbostock/4062045'>force directed network diagram</a>. While it has many roots, it stands on its own in terms of ability to visualize and scale to graphing of event sequence data. This page provides you an example implementation of the Jump Plot in d3.js, adapted from Mike Bostock's <a href="https://bost.ocks.org/mike/hive/">hive plot page</a>. </p>
+
+<p>The layout of the Jump Plot maintains the integrity of the event sequence you are analyzing, keeping checkpoints (aka nodes) in sequence order. Ultimately this keeps the overall flow of the sequence (which occurs over time) on the horizontal axis, in line with the expectations of our reader. Hops (aka links/edges) are drawn connecting one checkpoint to another (usually drawn with <a href='https://en.wikipedia.org/wiki/B%C3%A9zier_curve'>Bezier curves</a>). Hops visually represent the movement from one checkpoint to the next (e.g., moving to the next step in your process). The measure of time elapsed for the hop is utilized to plot the height of the Bezier curve. This design results in a scalable graph type for sequence of events with the ability to handle both contiguous and discontiguous hops (a main value add of the design).</p>
+
+<p>While the Jump Plot examples on this page are leveraging mocked up data, they demonstrate the graph types capability to scale to high volume event sequences. There are additional examples of implementations at <a href="http://www.jumpplot.com">jumpplot.com</a>.</p>
+
+<script>
+  (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+  (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+  m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+  })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+
+  ga('create', 'UA-65113559-2', 'auto');
+  ga('send', 'pageview');
+
+</script>
+
+<script src="//d3js.org/d3.v3.min.js"></script>
+<script src="d3.jump.js"></script>
+<script>
+
+var width = 667,//960,
+    height = 375,//850,
+    formatNumber = d3.format(",d");
+
+//transform the x/y points into the hive using the scale (e.g., y is radius, x is angle)
+//angle is equal to the ordinal scale of 
+//x is which axis the node is put on, y is the space on the axis that is in
+d3.json("jp.json", function(error, jumpplot) {
+  if (error) throw error;
+
+var checkpoints = jumpplot.checkpoints;
+
+var hops = jumpplot.hops;
+
+var xAxis = d3.scale.linear()
+  .domain([0, d3.max(checkpoints, function(d) { return d.sequence+1; })])
+  .range([0, width*.8]), //this radius basically keeps track of how long the axes are  
+    
+
+    xAxisAxis = d3.svg.axis()
+      .scale(xAxis);
+
+    yAxis = d3.scale.linear()
+  .domain([0,d3.max(hops, function(d) { return d3.round(d.value,2)+1; })])
+  .range([0,-height*.6]), //this radius basically keeps track of how long the axes are
+    
+    yAxisAxis = d3.svg.axis()
+      .scale(yAxis)
+      .orient("left")
+      .ticks(5),
+
+    color = d3.scale.category10().domain(d3.range(20));
+
+var info = d3.select("#info")
+    .text(defaultInfo = "Showing " + formatNumber(hops.length) + " hops among " + formatNumber(checkpoints.length) + " checkpoints.");
+
+var svg = d3.select("#chart").append("svg")
+    .attr("width", width)
+    .attr("height", height)
+    .append("g")
+    .attr("transform", "translate(" + width*.1 + "," + height/1.3 + ")");
+
+svg.selectAll(".axis")
+    .data(d3.range(1))
+    .enter().append("line")
+    .attr("class", "axis")
+    .attr("x1", xAxis.range()[0])
+    .attr("x2", xAxis.range()[1]);
+
+// Add the text label for the Y axis
+svg.append("text")
+    .attr("x",(width*.64))
+    .attr("y", height*.1)
+    .style("fill","orange")
+    .style("opacity",.8)
+    .style("text-anchor", "right")
+    .text("Sequence of Events →");
+
+svg.append("g")         // Add the Y Axis
+        .attr("class", "axis")
+        .style("stroke","grey")
+        .style("fill","grey")
+        .call(yAxisAxis);
+
+// Add the text label for the Y axis
+svg.append("text")
+    .attr("transform", "rotate(-90)")
+    .attr("y", -width*.08)// - margin.left)
+    .attr("x",((height*.6)/2))
+    .attr("dy", "1em")
+    .style("fill","grey")
+    .style("text-anchor", "middle")
+    .text("Seconds Elapsed →");
+
+//need to add y-axis to scale the view appropriately for the reader
+svg.selectAll(".link")
+    .data(hops)
+    .enter().append("path")
+//    .filter(function(d) {return d.region === filterVal}) // this is useful for filtering the data based on click
+    .attr("class", "link")
+    .attr("d", d3.jump.hop(xAxis,yAxis,"q"))
+    .on("mouseover", linkMouseover)
+    .on("mouseout", mouseout)
+    .on("click", function(d) {filterHops2(d.team,d.region,d.product);});
+    
+svg.selectAll(".node")
+    .data(checkpoints)
+    .enter().append("circle")
+    .attr("class", "node")
+    .attr("cx", function(d) { return xAxis(d.sequence); })
+    .attr("cy", function(d) { return yAxis(0); })
+    .attr("r", 5)
+    .style("fill", "orange") //function(d) { return color(d.sequence); })
+    .on("mouseover", nodeMouseover)
+    .on("mouseout", mouseout);
+
+// Highlight the link and connected nodes on mouseover.
+function linkMouseover(d) {
+  svg.selectAll(".link").classed("active", function(p) { return p === d; });
+  svg.selectAll(".node circle").classed("active", function(p) { return p === d.source || p === d.target; });
+  info.text(d.source + " → " + d.target + " (click to filter Detailed JP on " + d.team + ")");// + " - " + d.team);
+}
+
+// Highlight the node and connected links on mouseover.
+function nodeMouseover(d) {
+  svg.selectAll(".link").classed("active", function(p) { return p.source === d || p.target === d; });
+  d3.select(this).classed("active", true);
+  info.text(d.checkpoint + " checkpoint");
+}
+
+// Clear any highlighted nodes or links.
+function mouseout() {
+  svg.selectAll(".active").classed("active", false);
+  info.text(defaultInfo);
+}
+});
+
+function colorHops() {
+  var svg = d3.select("#chart").transition();
+  var color = d3.scale.category10().domain(d3.range(20));
+  var btn = document.getElementById("colorButton").value;
+
+  if (btn === "Color Hops") {
+    document.getElementById("colorButton").value = "Remove Color" 
+
+    svg.selectAll(".link")
+      .style("stroke", function(d) { return color(d.region);}); // this colors the curves as well. 
+  }
+  else {
+    document.getElementById("colorButton").value = "Color Hops" 
+  
+    svg.selectAll(".link")
+      .style("stroke", ""); // this colors the curves as well. 
+  }
+}
+
+function changeChecks() {
+  var svg = d3.select("#chart").transition();
+  var btn = document.getElementById("circleButton").value;
+
+  if (btn === "Small Checkpoints") {
+    document.getElementById("circleButton").value = "Big Checkpoints" 
+
+    svg.selectAll(".node")
+      .duration(1000)
+      .attr("r", 5)
+  }
+  else {
+    document.getElementById("circleButton").value = "Small Checkpoints" 
+
+    svg.selectAll(".node")
+      .duration(1000)
+      .attr("r", 10)
+  }
+}
+
+function changeHops() {
+  var svg = d3.select("#chart").transition();
+  var btn = document.getElementById("hopButton").value;
+
+  if (btn === "Small Hops") {
+    document.getElementById("hopButton").value = "Big Hops" 
+
+    svg.selectAll(".link")
+      .duration(1000)
+      .style('stroke-width',1.5)
+  }
+  else {
+    document.getElementById("hopButton").value = "Small Hops" 
+
+    svg.selectAll(".link")
+      .duration(1000)
+      .style('stroke-width',10)
+  }
+}
+
+function changeCurves() {
+  var svg = d3.select("#chart").select("svg").select("g");
+  var btn = document.getElementById("bezierButton").value;
+
+  d3.json("jp.json", function(error, jumpplot) {
+  if (error) throw error;
+
+  var checkpoints = jumpplot.checkpoints;
+
+  var hops = jumpplot.hops;
+
+  var xAxis = d3.scale.linear()
+    .domain([0, d3.max(checkpoints, function(d) { return d.sequence+1; })])
+    .range([0, width*.8]), //this radius basically keeps track of how long the axes are  
+
+    yAxis = d3.scale.linear()
+  .domain([0,d3.max(hops, function(d) { return d3.round(d.value,2)+1; })])
+  .range([0, -height*.6]); //this radius basically keeps track of how long the axes are
+
+  if (btn === "Cubic") {
+    document.getElementById("bezierButton").value = "Quadratic" 
+
+    svg.selectAll(".link")
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,"c"));
+  }
+  else {
+    document.getElementById("bezierButton").value = "Cubic" 
+
+    svg.selectAll(".link")
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,"q"));
+  }
+});
+}
+
+// this function does not work yet, it does error but it doesn't work
+function filterHops(filterVal) {
+  var svg = d3.select("#chart").select("svg").select("g");
+  var btn = document.getElementById("bezierButton").value;
+
+  if (btn === "Cubic") {t = "q"} else {t = "c"};
+
+  d3.selection.prototype.moveToFront = function() {
+    return this.each(function(){
+      this.parentNode.appendChild(this);
+    });
+  };
+
+  d3.json("jp.json", function(error, jumpplot) {
+  if (error) throw error;
+
+  var checkpoints = jumpplot.checkpoints;
+
+  if (filterVal=="revert"){
+    var hops = jumpplot.hops;
+  }
+  else{
+    var hops = jumpplot.hops.filter(function(d) {return d.region == filterVal});
+  }
+
+  //scale get the data again
+  var xAxis = d3.scale.linear()
+    .domain([0, d3.max(checkpoints, function(d) { return d.sequence+1; })])
+    .range([0, width*.8]), //this radius basically keeps track of how long the axes are  
+
+    yAxis = d3.scale.linear()
+  .domain([0,d3.max(hops, function(d) { return d3.round(d.value,2)+1; })])
+  .range([0, -height*.6]), //this radius basically keeps track of how long the axes are
+
+    yAxisAxis = d3.svg.axis()
+      .scale(yAxis)
+      .orient("left")
+      .ticks(5);
+
+  var axis = svg.select("g")
+    .transition()
+    .duration(1000)
+    .call(yAxisAxis);
+  //this is needed to log to
+
+  var link = svg.selectAll(".link")
+    .data(hops);
+
+  // append newly added elements 
+  link.enter().append("path")
+    .attr("class", "link")
+    .on("mouseover", linkMouseover)
+    .on("mouseout", mouseout)
+    .on("click", function(d) {filterHops2(d.team,d.region,d.product);})
+//    .attr("d", d3.jump.hop(xAxis,yAxis,"q","y")) // including this make it so that we cannot see path (it is like the second doesn't run)
+    .style("opacity",0);
+
+  // EXIT
+  // Remove old elements as needed.
+  link.exit()
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,t,"y"))
+      .style("fill-opacity", 0)
+      .remove();
+
+  link.attr("class", "link")
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,t))
+      .style("opacity",1);
+
+  // need to make sure that we keep the circles in front
+  d3.selectAll(".node").moveToFront();
+
+var info = d3.select("#info")
+    .text(defaultInfo = "Showing " + formatNumber(hops.length) + " hops among " + formatNumber(checkpoints.length) + " checkpoints.");
+
+// Highlight the link and connected nodes on mouseover.
+function linkMouseover(d) {
+  svg.selectAll(".link").classed("active", function(p) { return p === d; });
+  svg.selectAll(".node circle").classed("active", function(p) { return p === d.source || p === d.target; });
+  info.text(d.source + " → " + d.target + " " + d.team + " (click to filter Detailed JP)");// + " - " + d.team);
+}
+
+// Clear any highlighted nodes or links.
+function mouseout() {
+  svg.selectAll(".active").classed("active", false);
+  info.text(defaultInfo);
+}
+
+});
+}
+
+// Clear any highlighted nodes or links.
+// this does not work either, we are almost there, but need to re-draw the hops as well as update the axis 
+// more to do on this
+function linkClick(t) { // do the same thing again for the new data
+//d3.select("#chart").remove();
+var btn = document.getElementById("updateButton").value;
+
+if (btn === "Open Detail") {
+  document.getElementById("updateButton").value = "Close Detail" 
+}
+else {
+  document.getElementById("updateButton").value = "Open Detail"
+  d3.select("#chart2").select("svg").remove();
+  d3.select("#info2").text(defaultInfo2 = "");
+  return; 
+}
+
+d3.json("jpdtl.json", function(error, jumpplot) {
+  if (error) throw error;
+
+var checkpoints = jumpplot.checkpoints;
+
+if (t == null) {
+  var hops = jumpplot.hops;
+}
+else {
+  var hops = jumpplot.hops.filter(function(d) {return (d.team === t);}); //& d.region == r & d.product == p});
+}
+
+var xAxis = d3.scale.linear()
+  .domain([0, d3.max(checkpoints, function(d) { return d.sequence+1; })])
+  .range([0, (width*1.5)*.8]), //this radius basically keeps track of how long the axes are  
+    
+    yAxis = d3.scale.linear()
+  .domain([0,d3.max(hops, function(d) { return d3.round(d.value,2)+1; })])
+  .range([0, -(height*1.5)*.8]), //this radius basically keeps track of how long the axes are
+    
+    maxcount = d3.max(hops, function(d) { return (d.seriescount); })
+
+    color = d3.scale.category10().domain(d3.range(20));
+
+
+var info2 = d3.select("#info2")
+    .text(defaultInfo2 = "Showing " + formatNumber(hops.length) + " hops among " + formatNumber(checkpoints.length) + " checkpoints.");
+
+var svg = d3.select("#chart2").append("svg")
+    .attr("width", width*1.5)
+    .attr("height", height*1.5)
+    .append("g")
+    .attr("transform", "translate(" + (width*1.5)*.1 + "," + (height*1.5)/1.1 + ")");
+
+svg.selectAll(".axis")
+    .data(d3.range(1))
+    .enter().append("line")
+    .attr("class", "axis")
+    .attr("x1", xAxis.range()[0])
+    .attr("x2", xAxis.range()[1]);
+
+svg.selectAll(".link")
+    .data(hops)
+    .enter().append("path")
+    .attr("class", "link")
+    .attr("d", d3.jump.hop(xAxis,yAxis,"q"))
+    .style("stroke-width", function(d) {if ((parseFloat(d.seriescount) / parseFloat(maxcount))<.2) {w=2;} else {w=(parseFloat(d.seriescount) / parseFloat(maxcount))*10;} return w; })
+    .style("stroke-opacity", function(d) {if ((parseFloat(d.seriescount) / parseFloat(maxcount))<.3) {w=.1;} else {w=(parseFloat(d.seriescount) / parseFloat(maxcount))-.2;} return w; })
+    .on("mouseover", linkMouseover)
+    .on("mouseout", mouseout);
+    
+svg.selectAll(".node")
+    .data(checkpoints)
+    .enter().append("circle")
+    .attr("class", "node")
+    .attr("cx", function(d) { return xAxis(d.sequence); })
+    .attr("cy", function(d) { return yAxis(0); })
+    .attr("r", 5)
+    .style("fill", "orange") 
+    .on("mouseover", nodeMouseover)
+    .on("mouseout", mouseout);
+
+// Highlight the link and connected nodes on mouseover.
+function linkMouseover(d) {
+  svg.selectAll(".link").classed("active", function(p) { return p === d; });
+  svg.selectAll(".node circle").classed("active", function(p) { return p === d.source || p === d.target; });
+  info2.text(d.source + " → " + d.target); //+ " - " + d.team + " - " + d.value + " - " + d.seriescount + " - " + (parseFloat(d.seriescount) / parseFloat(maxcount)));
+}
+
+// Highlight the node and connected links on mouseover.
+function nodeMouseover(d) {
+  svg.selectAll(".link").classed("active", function(p) { return p.source === d || p.target === d; });
+  d3.select(this).classed("active", true);
+  info2.text(d.checkpoint + " checkpoint");
+}
+
+// Clear any highlighted nodes or links.
+function mouseout() {
+  svg.selectAll(".active").classed("active", false);
+  info2.text(defaultInfo2);
+}
+});
+}
+
+
+// this function does not work yet, it does error but it doesn't work
+function filterHops2(filterT) {
+  var svg = d3.select("#chart2").select("svg").select("g");
+  var btn = document.getElementById("updateButton").value;
+
+  if (btn === "Open Detail") {
+    linkClick(filterT)
+  }
+
+  var btn = document.getElementById("bezierButton").value;
+  if (btn === "Cubic") {t = "q"} else {t = "c"};
+
+  d3.selection.prototype.moveToFront = function() {
+    return this.each(function(){
+      this.parentNode.appendChild(this);
+    });
+  };
+
+  d3.json("jpdtl.json", function(error, jumpplot) {
+  if (error) throw error;
+
+  var checkpoints = jumpplot.checkpoints;
+
+  var hopsHide = jumpplot.hops;
+
+  var hops = jumpplot.hops.filter(function(d) {return (d.team === filterT);}); //& d.region == r & d.product == p});
+
+var xAxis = d3.scale.linear()
+  .domain([0, d3.max(checkpoints, function(d) { return d.sequence+1; })])
+  .range([0, (width*1.5)*.8]), //this radius basically keeps track of how long the axes are  
+    
+    yAxis = d3.scale.linear()
+  .domain([0,d3.max(hops, function(d) { return d3.round(d.value,2)+1; })])
+  .range([0, -(height*1.5)*.8]), //this radius basically keeps track of how long the axes are
+    
+    maxcount = d3.max(hops, function(d) { return (d.seriescount); })
+
+    color = d3.scale.category10().domain(d3.range(20));
+
+  var link = svg.selectAll(".link")
+    .data(hops);
+
+  // append newly added elements 
+  link.enter().append("path")
+    .attr("class", "link")
+    .on("mouseover", linkMouseover)
+    .on("mouseout", mouseout)
+    .style("opacity",0);
+
+  // EXIT
+  // Remove old elements as needed.
+  link.exit()
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,t,"y"))
+      .style("fill-opacity", 0)
+      .remove();
+
+  link.attr("class", "link")
+    .transition()
+      .duration(1000)
+      .attr("d", d3.jump.hop(xAxis,yAxis,t))
+      .style("opacity",1);
+
+  // need to make sure that we keep the circles in front
+  d3.selectAll(".node").moveToFront();
+
+  var info2 = d3.select("#info2")
+      .text(defaultInfo2 = "Showing " + formatNumber(hops.length) + " hops among " + formatNumber(checkpoints.length) + " checkpoints.");
+
+  // Highlight the link and connected nodes on mouseover.
+  function linkMouseover(d) {
+    svg.selectAll(".link").classed("active", function(p) { return p === d; });
+    svg.selectAll(".node circle").classed("active", function(p) { return p === d.source || p === d.target; });
+    info2.text(d.source + " → " + d.target + " " + d.team + " (click to filter Detailed JP)");// + " - " + d.team);
+  }
+
+  // Clear any highlighted nodes or links.
+  function mouseout() {
+    svg.selectAll(".active").classed("active", false);
+    info2.text(defaultInfo);
+  }
+
+});
+}
+
+</script>
